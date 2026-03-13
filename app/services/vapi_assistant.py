@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from app.config import settings
-from app.services.session_store import get_session
+from app.services.session_store import get_session, update_session
+
+logger = logging.getLogger(__name__)
 
 VAPI_BASE = "https://api.vapi.ai"
+VAPI_HEADERS = {
+    "Authorization": f"Bearer {settings.vapi_api_key}",
+    "Content-Type": "application/json",
+}
 
 ASSISTANT_SYSTEM_PROMPT = """\
 You are a knowledgeable document discussion assistant. You have been given a document to discuss with the user.
@@ -31,11 +39,12 @@ Your role:
 """
 
 FIRST_MESSAGE_TEMPLATE = (
-    "Hi! I've read through \"{title}\" and I'm ready to discuss it with you. "
+    'Hi! I\'ve read through "{title}" and I\'m ready to discuss it with you. '
     "What would you like to know about it?"
 )
 
-TOOL_DEFINITIONS = [
+# Tool definitions to create via POST /tool
+TOOL_SPECS = [
     {
         "type": "function",
         "function": {
@@ -52,7 +61,6 @@ TOOL_DEFINITIONS = [
                 "required": ["query"],
             },
         },
-        "server": {"url": "{webhook_url}"},
     },
     {
         "type": "function",
@@ -61,7 +69,6 @@ TOOL_DEFINITIONS = [
             "description": "Get the pre-generated key points from the document summary",
             "parameters": {"type": "object", "properties": {}},
         },
-        "server": {"url": "{webhook_url}"},
     },
     {
         "type": "function",
@@ -70,16 +77,28 @@ TOOL_DEFINITIONS = [
             "description": "Get suggested further reading links related to the document",
             "parameters": {"type": "object", "properties": {}},
         },
-        "server": {"url": "{webhook_url}"},
     },
 ]
 
 
-def _build_tools(webhook_url: str) -> list[dict]:
-    import json
-    tools_json = json.dumps(TOOL_DEFINITIONS)
-    tools_json = tools_json.replace("{webhook_url}", webhook_url)
-    return json.loads(tools_json)
+async def _create_tools(client: httpx.AsyncClient, webhook_url: str) -> list[str]:
+    """Create tools via VAPI API and return their IDs."""
+    tool_ids = []
+    for spec in TOOL_SPECS:
+        payload = {**spec, "server": {"url": webhook_url}}
+        resp = await client.post(
+            f"{VAPI_BASE}/tool",
+            json=payload,
+            headers=VAPI_HEADERS,
+            timeout=15,
+        )
+        if resp.status_code >= 400:
+            logger.error("VAPI tool creation failed: %s %s", resp.status_code, resp.text)
+            resp.raise_for_status()
+        data = resp.json()
+        tool_ids.append(data["id"])
+        logger.info("Created VAPI tool %s: %s", data["id"], spec["function"]["name"])
+    return tool_ids
 
 
 async def create_document_assistant(session_id: str) -> str:
@@ -99,47 +118,87 @@ async def create_document_assistant(session_id: str) -> str:
     )
     first_message = FIRST_MESSAGE_TEMPLATE.format(title=session.title)
 
-    payload = {
-        "name": f"DocAssistant-{session_id[:8]}",
-        "firstMessage": first_message,
-        "model": {
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-20250514",
-            "messages": [{"role": "system", "content": system_prompt}],
-        },
-        "voice": {
-            "provider": "11labs",
-            "voiceId": "21m00Tcm4TlvDq8ikWAM",  # Rachel
-        },
-        "tools": _build_tools(webhook_url),
-        "metadata": {"session_id": session_id},
-        "serverUrl": webhook_url,
-    }
-
     async with httpx.AsyncClient() as client:
+        # Step 1: Create tools
+        tool_ids = await _create_tools(client, webhook_url)
+
+        # Step 2: Create assistant with tool references
+        payload = {
+            "name": f"DocAssistant-{session_id[:8]}",
+            "firstMessage": first_message,
+            "model": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "system", "content": system_prompt}],
+                "toolIds": tool_ids,
+            },
+            "voice": {
+                "provider": "vapi",
+                "voiceId": "Elliot",
+            },
+            "transcriber": {
+                "provider": "deepgram",
+                "model": "nova-3",
+                "language": "en",
+            },
+            "silenceTimeoutSeconds": 30,
+            "responseDelaySeconds": 1.5,
+            "startSpeakingPlan": {
+                "waitSeconds": 1.8,
+                "smartEndpointingEnabled": False,
+            },
+            "stopSpeakingPlan": {
+                "numWords": 0,
+                "voiceSeconds": 0.3,
+                "backoffSeconds": 2.0,
+            },
+            "metadata": {"session_id": session_id},
+            "serverUrl": webhook_url,
+        }
+
         resp = await client.post(
             f"{VAPI_BASE}/assistant",
             json=payload,
-            headers={
-                "Authorization": f"Bearer {settings.vapi_api_key}",
-                "Content-Type": "application/json",
-            },
+            headers=VAPI_HEADERS,
             timeout=30,
         )
-        resp.raise_for_status()
+        if resp.status_code >= 400:
+            logger.error("VAPI assistant creation failed: %s %s", resp.status_code, resp.text)
+            resp.raise_for_status()
         data = resp.json()
 
     assistant_id = data["id"]
-    # Update session with assistant ID
-    from app.services.session_store import update_session
-    update_session(session_id, vapi_assistant_id=assistant_id)
+    update_session(
+        session_id,
+        vapi_assistant_id=assistant_id,
+        vapi_tool_ids=tool_ids,
+    )
+    logger.info("Created VAPI assistant %s with %d tools", assistant_id, len(tool_ids))
     return assistant_id
 
 
-async def delete_assistant(assistant_id: str) -> None:
+async def delete_assistant(assistant_id: str, tool_ids: list[str] | None = None) -> None:
     async with httpx.AsyncClient() as client:
-        await client.delete(
-            f"{VAPI_BASE}/assistant/{assistant_id}",
-            headers={"Authorization": f"Bearer {settings.vapi_api_key}"},
-            timeout=15,
-        )
+        # Delete assistant
+        try:
+            await client.delete(
+                f"{VAPI_BASE}/assistant/{assistant_id}",
+                headers=VAPI_HEADERS,
+                timeout=15,
+            )
+            logger.info("Deleted VAPI assistant %s", assistant_id)
+        except Exception:
+            logger.exception("Failed to delete assistant %s", assistant_id)
+
+        # Delete tools
+        if tool_ids:
+            for tid in tool_ids:
+                try:
+                    await client.delete(
+                        f"{VAPI_BASE}/tool/{tid}",
+                        headers=VAPI_HEADERS,
+                        timeout=15,
+                    )
+                    logger.info("Deleted VAPI tool %s", tid)
+                except Exception:
+                    logger.exception("Failed to delete tool %s", tid)

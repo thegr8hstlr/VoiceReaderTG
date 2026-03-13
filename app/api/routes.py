@@ -34,7 +34,7 @@ async def chat_page(request: Request, session_id: str):
             "session_id": session_id,
             "title": session.title,
             "summary": session.summary_result.summary,
-            "vapi_public_key": settings.vapi_public_key,
+            "vapi_api_key": settings.vapi_api_key,
         },
     )
 
@@ -45,13 +45,12 @@ async def start_assistant(session_id: str):
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found or expired")
 
-    # Create VAPI assistant if not already created
     if session.vapi_assistant_id:
         return JSONResponse(content={"assistant_id": session.vapi_assistant_id})
 
     try:
         assistant_id = await create_document_assistant(session_id)
         return JSONResponse(content={"assistant_id": assistant_id})
-    except Exception:
-        logger.exception("Failed to create VAPI assistant")
+    except Exception as e:
+        logger.exception("Failed to create VAPI assistant: %s", e)
         raise HTTPException(status_code=500, detail="Failed to create voice assistant")

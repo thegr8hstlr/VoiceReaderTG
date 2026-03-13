@@ -40,4 +40,5 @@ class SessionData(BaseModel):
     full_text: str
     summary_result: SummaryResult
     vapi_assistant_id: Optional[str] = None
+    vapi_tool_ids: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

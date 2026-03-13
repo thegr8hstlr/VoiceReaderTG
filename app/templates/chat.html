@@ -17,58 +17,17 @@
             padding: 2rem 1rem;
         }
         .container { max-width: 600px; width: 100%; }
-        h1 {
-            font-size: 1.4rem;
-            margin-bottom: 0.5rem;
-            color: #fff;
-        }
-        .summary {
-            font-size: 0.9rem;
-            color: #999;
-            margin-bottom: 2rem;
-            line-height: 1.5;
-        }
+        h1 { font-size: 1.4rem; margin-bottom: 0.5rem; color: #fff; }
+        .summary { font-size: 0.9rem; color: #999; margin-bottom: 2rem; line-height: 1.5; }
         .call-area {
             background: #1a1a1a;
             border-radius: 16px;
             padding: 2rem;
             text-align: center;
         }
-        #status {
-            font-size: 0.85rem;
-            color: #666;
-            margin-bottom: 1.5rem;
-            min-height: 1.2em;
-        }
-        #call-btn {
-            width: 80px;
-            height: 80px;
-            border-radius: 50%;
-            border: none;
-            background: #2563eb;
-            color: white;
-            font-size: 1.8rem;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-        }
-        #call-btn:hover { background: #1d4ed8; transform: scale(1.05); }
-        #call-btn.active { background: #dc2626; }
-        #call-btn.active:hover { background: #b91c1c; }
-        #call-btn:disabled { background: #333; cursor: not-allowed; }
-        .transcript {
-            margin-top: 1.5rem;
-            text-align: left;
-            max-height: 300px;
-            overflow-y: auto;
-            font-size: 0.85rem;
-            line-height: 1.6;
-        }
-        .transcript p { margin-bottom: 0.5rem; }
-        .transcript .assistant { color: #60a5fa; }
-        .transcript .user { color: #34d399; }
+        #status { font-size: 0.85rem; color: #666; margin-bottom: 1rem; min-height: 1.2em; }
+        #error-msg { color: #f87171; font-size: 0.8rem; margin-top: 0.5rem; display: none; }
+        .info { font-size: 0.8rem; color: #555; margin-top: 1rem; }
     </style>
 </head>
 <body>
@@ -77,99 +36,85 @@
         <p class="summary">{{ summary[:300] }}{% if summary|length > 300 %}...{% endif %}</p>
 
         <div class="call-area">
-            <div id="status">Click to start a voice discussion</div>
-            <button id="call-btn" onclick="toggleCall()">&#x1F3A4;</button>
-            <div class="transcript" id="transcript"></div>
+            <div id="status">Preparing document assistant...</div>
+            <div id="error-msg"></div>
+            <p class="info">A voice button will appear in the bottom-right corner once ready.</p>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi.umd.js"></script>
     <script>
         const SESSION_ID = "{{ session_id }}";
-        const VAPI_PUBLIC_KEY = "{{ vapi_public_key }}";
+        const VAPI_API_KEY = "{{ vapi_api_key }}";
+        const BASE_URL = window.location.origin;
 
-        let vapi = null;
-        let isCallActive = false;
-        let assistantId = null;
-
-        async function initAssistant() {
+        async function init() {
             const statusEl = document.getElementById("status");
-            statusEl.textContent = "Preparing assistant...";
+            const errorEl = document.getElementById("error-msg");
 
-            const resp = await fetch(`/chat/${SESSION_ID}/start`, { method: "POST" });
-            if (!resp.ok) {
-                statusEl.textContent = "Failed to create assistant. Please try again.";
-                return false;
+            try {
+                // Step 1: Create assistant via our backend
+                const resp = await fetch(BASE_URL + "/chat/" + SESSION_ID + "/start", { method: "POST" });
+                if (!resp.ok) throw new Error("Server error: " + resp.status);
+                const data = await resp.json();
+                const assistantId = data.assistant_id;
+                console.log("Assistant created:", assistantId);
+                statusEl.textContent = "Assistant ready! Loading voice widget...";
+
+                // Step 2: Load VAPI widget with the assistant ID
+                var script = document.createElement("script");
+                script.src = "https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js";
+                script.defer = true;
+                script.async = true;
+
+                script.onload = function () {
+                    statusEl.textContent = "Ready! Click the green button in the bottom-right to start talking.";
+                    window.vapiSDK.run({
+                        apiKey: VAPI_API_KEY,
+                        assistant: assistantId,
+                        config: {
+                            position: "bottom-right",
+                            offset: "40px",
+                            width: "50px",
+                            height: "50px",
+                            idle: {
+                                color: "rgb(93, 254, 202)",
+                                type: "pill",
+                                title: "Discuss Document",
+                                subtitle: "Click to talk",
+                                icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone.svg",
+                            },
+                            loading: {
+                                color: "rgb(93, 124, 202)",
+                                type: "pill",
+                                title: "Connecting...",
+                                subtitle: "Please wait",
+                                icon: "https://unpkg.com/lucide-static@0.321.0/icons/loader-2.svg",
+                            },
+                            active: {
+                                color: "rgb(255, 0, 0)",
+                                type: "pill",
+                                title: "Call Active",
+                                subtitle: "Click to end",
+                                icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone-off.svg",
+                            },
+                        },
+                    });
+                };
+
+                script.onerror = function () {
+                    statusEl.textContent = "Failed to load voice widget.";
+                };
+
+                document.body.appendChild(script);
+            } catch (err) {
+                console.error("Init error:", err);
+                statusEl.textContent = "Failed to initialize.";
+                errorEl.textContent = err.message;
+                errorEl.style.display = "block";
             }
-            const data = await resp.json();
-            assistantId = data.assistant_id;
-            return true;
         }
 
-        async function toggleCall() {
-            const btn = document.getElementById("call-btn");
-            const statusEl = document.getElementById("status");
-
-            if (isCallActive) {
-                vapi.stop();
-                return;
-            }
-
-            btn.disabled = true;
-
-            if (!assistantId) {
-                const ok = await initAssistant();
-                if (!ok) { btn.disabled = false; return; }
-            }
-
-            // Initialize VAPI Web SDK
-            if (!vapi) {
-                vapi = new window.Vapi(VAPI_PUBLIC_KEY);
-
-                vapi.on("call-start", () => {
-                    isCallActive = true;
-                    btn.classList.add("active");
-                    btn.disabled = false;
-                    btn.innerHTML = "&#x23F9;";
-                    statusEl.textContent = "Connected — speak now";
-                });
-
-                vapi.on("call-end", () => {
-                    isCallActive = false;
-                    btn.classList.remove("active");
-                    btn.disabled = false;
-                    btn.innerHTML = "&#x1F3A4;";
-                    statusEl.textContent = "Call ended";
-                    assistantId = null;
-                });
-
-                vapi.on("message", (msg) => {
-                    if (msg.type === "transcript") {
-                        appendTranscript(msg.role, msg.transcript);
-                    }
-                });
-
-                vapi.on("error", (err) => {
-                    console.error("VAPI error:", err);
-                    statusEl.textContent = "Error: " + (err.message || "Connection failed");
-                    btn.disabled = false;
-                });
-            }
-
-            statusEl.textContent = "Connecting...";
-            vapi.start(assistantId);
-        }
-
-        function appendTranscript(role, text) {
-            if (!text) return;
-            const container = document.getElementById("transcript");
-            const p = document.createElement("p");
-            p.className = role;
-            const label = role === "assistant" ? "AI" : "You";
-            p.textContent = `${label}: ${text}`;
-            container.appendChild(p);
-            container.scrollTop = container.scrollHeight;
-        }
+        init();
     </script>
 </body>
 </html>
