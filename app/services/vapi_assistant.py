@@ -101,6 +101,86 @@ async def _create_tools(client: httpx.AsyncClient, webhook_url: str) -> list[str
     return tool_ids
 
 
+async def create_web_call(session_id: str) -> str:
+    """Create a web call server-side using the private API key.
+
+    This bypasses the public key entirely. Returns the webCallUrl
+    that the browser joins via Daily.co.
+    """
+    session = get_session(session_id)
+    if session is None:
+        raise ValueError(f"Session {session_id} not found")
+
+    webhook_url = f"{settings.base_url}/webhook/vapi"
+    key_points_text = "\n".join(f"- {p}" for p in session.summary_result.key_points)
+    full_text_truncated = session.full_text[:15_000]
+
+    system_prompt = ASSISTANT_SYSTEM_PROMPT.format(
+        title=session.title,
+        summary=session.summary_result.summary,
+        key_points=key_points_text,
+        full_text_truncated=full_text_truncated,
+    )
+    first_message = FIRST_MESSAGE_TEMPLATE.format(title=session.title)
+
+    # Inline tool definitions with server URLs
+    tools = [{**spec, "server": {"url": webhook_url}} for spec in TOOL_SPECS]
+
+    payload = {
+        "type": "webCall",
+        "assistant": {
+            "name": f"DocAssistant-{session_id[:8]}",
+            "firstMessage": first_message,
+            "model": {
+                "provider": "openai",
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "system", "content": system_prompt}],
+                "tools": tools,
+            },
+            "voice": {
+                "provider": "vapi",
+                "voiceId": "Elliot",
+            },
+            "transcriber": {
+                "provider": "deepgram",
+                "model": "nova-3",
+                "language": "en",
+            },
+            "silenceTimeoutSeconds": 30,
+            "responseDelaySeconds": 1.5,
+            "startSpeakingPlan": {
+                "waitSeconds": 1.8,
+                "smartEndpointingEnabled": False,
+            },
+            "stopSpeakingPlan": {
+                "numWords": 0,
+                "voiceSeconds": 0.3,
+                "backoffSeconds": 2.0,
+            },
+            "metadata": {"session_id": session_id},
+            "serverUrl": webhook_url,
+        },
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{VAPI_BASE}/call",
+            json=payload,
+            headers=VAPI_HEADERS,
+            timeout=30,
+        )
+        if resp.status_code >= 400:
+            logger.error("VAPI web call creation failed: %s %s", resp.status_code, resp.text)
+            resp.raise_for_status()
+        data = resp.json()
+        logger.info("VAPI call response keys: %s", list(data.keys()))
+
+    web_call_url = data.get("webCallUrl", "")
+    call_id = data.get("id", "")
+    logger.info("Created VAPI web call %s, url=%s", call_id, web_call_url)
+    return web_call_url
+
+
 async def create_document_assistant(session_id: str) -> str:
     session = get_session(session_id)
     if session is None:

@@ -25,9 +25,37 @@
             padding: 2rem;
             text-align: center;
         }
-        #status { font-size: 0.85rem; color: #666; margin-bottom: 1rem; min-height: 1.2em; }
-        #error-msg { color: #f87171; font-size: 0.8rem; margin-top: 0.5rem; display: none; }
-        .info { font-size: 0.8rem; color: #555; margin-top: 1rem; }
+        #status { font-size: 0.85rem; color: #666; margin-bottom: 1.5rem; min-height: 1.2em; }
+        #call-btn {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            border: none;
+            background: #2563eb;
+            color: white;
+            font-size: 1.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #call-btn:hover { background: #1d4ed8; transform: scale(1.05); }
+        #call-btn.active { background: #dc2626; }
+        #call-btn.active:hover { background: #b91c1c; }
+        #call-btn:disabled { background: #333; cursor: not-allowed; transform: none; }
+        #error-msg { color: #f87171; font-size: 0.8rem; margin-top: 1rem; display: none; }
+        .transcript {
+            margin-top: 1.5rem;
+            text-align: left;
+            max-height: 300px;
+            overflow-y: auto;
+            font-size: 0.85rem;
+            line-height: 1.6;
+        }
+        .transcript p { margin-bottom: 0.5rem; }
+        .transcript .assistant { color: #60a5fa; }
+        .transcript .user { color: #34d399; }
     </style>
 </head>
 <body>
@@ -36,85 +64,99 @@
         <p class="summary">{{ summary[:300] }}{% if summary|length > 300 %}...{% endif %}</p>
 
         <div class="call-area">
-            <div id="status">Preparing document assistant...</div>
+            <div id="status">Click the mic to start a voice discussion</div>
+            <button id="call-btn">&#x1F3A4;</button>
             <div id="error-msg"></div>
-            <p class="info">A voice button will appear in the bottom-right corner once ready.</p>
+            <div class="transcript" id="transcript"></div>
         </div>
     </div>
 
+    <script src="https://unpkg.com/@daily-co/daily-js"></script>
     <script>
-        const SESSION_ID = "{{ session_id }}";
-        const VAPI_API_KEY = "{{ vapi_api_key }}";
-        const BASE_URL = window.location.origin;
+        var SESSION_ID = "{{ session_id }}";
+        var BASE_URL = window.location.origin;
 
-        async function init() {
-            const statusEl = document.getElementById("status");
-            const errorEl = document.getElementById("error-msg");
+        var btn = document.getElementById("call-btn");
+        var statusEl = document.getElementById("status");
+        var errorEl = document.getElementById("error-msg");
 
-            try {
-                // Step 1: Create assistant via our backend
-                const resp = await fetch(BASE_URL + "/chat/" + SESSION_ID + "/start", { method: "POST" });
-                if (!resp.ok) throw new Error("Server error: " + resp.status);
-                const data = await resp.json();
-                const assistantId = data.assistant_id;
-                console.log("Assistant created:", assistantId);
-                statusEl.textContent = "Assistant ready! Loading voice widget...";
+        var callFrame = null;
+        var isCallActive = false;
 
-                // Step 2: Load VAPI widget with the assistant ID
-                var script = document.createElement("script");
-                script.src = "https://cdn.jsdelivr.net/gh/VapiAI/html-script-tag@latest/dist/assets/index.js";
-                script.defer = true;
-                script.async = true;
-
-                script.onload = function () {
-                    statusEl.textContent = "Ready! Click the green button in the bottom-right to start talking.";
-                    window.vapiSDK.run({
-                        apiKey: VAPI_API_KEY,
-                        assistant: assistantId,
-                        config: {
-                            position: "bottom-right",
-                            offset: "40px",
-                            width: "50px",
-                            height: "50px",
-                            idle: {
-                                color: "rgb(93, 254, 202)",
-                                type: "pill",
-                                title: "Discuss Document",
-                                subtitle: "Click to talk",
-                                icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone.svg",
-                            },
-                            loading: {
-                                color: "rgb(93, 124, 202)",
-                                type: "pill",
-                                title: "Connecting...",
-                                subtitle: "Please wait",
-                                icon: "https://unpkg.com/lucide-static@0.321.0/icons/loader-2.svg",
-                            },
-                            active: {
-                                color: "rgb(255, 0, 0)",
-                                type: "pill",
-                                title: "Call Active",
-                                subtitle: "Click to end",
-                                icon: "https://unpkg.com/lucide-static@0.321.0/icons/phone-off.svg",
-                            },
-                        },
-                    });
-                };
-
-                script.onerror = function () {
-                    statusEl.textContent = "Failed to load voice widget.";
-                };
-
-                document.body.appendChild(script);
-            } catch (err) {
-                console.error("Init error:", err);
-                statusEl.textContent = "Failed to initialize.";
-                errorEl.textContent = err.message;
-                errorEl.style.display = "block";
-            }
+        function setError(msg) {
+            errorEl.textContent = msg;
+            errorEl.style.display = msg ? "block" : "none";
         }
 
-        init();
+        btn.addEventListener("click", function() {
+            if (isCallActive) {
+                if (callFrame) callFrame.leave();
+                isCallActive = false;
+                btn.classList.remove("active");
+                btn.innerHTML = "\uD83C\uDFA4";
+                statusEl.textContent = "Call ended. Click mic to start again.";
+                return;
+            }
+
+            btn.disabled = true;
+            setError("");
+            statusEl.textContent = "Creating voice call...";
+
+            fetch(BASE_URL + "/chat/" + SESSION_ID + "/start", { method: "POST" })
+                .then(function(resp) {
+                    if (!resp.ok) throw new Error("Server error " + resp.status);
+                    return resp.json();
+                })
+                .then(function(data) {
+                    var webCallUrl = data.web_call_url;
+                    console.log("Web call URL:", webCallUrl);
+                    statusEl.textContent = "Connecting to voice call...";
+
+                    callFrame = DailyIframe.createCallObject({
+                        audioSource: true,
+                        videoSource: false,
+                    });
+
+                    callFrame.on("joined-meeting", function() {
+                        console.log("Joined meeting");
+                        isCallActive = true;
+                        btn.classList.add("active");
+                        btn.disabled = false;
+                        btn.innerHTML = "\u23F9";
+                        statusEl.textContent = "Connected \u2014 speak now";
+                        setError("");
+                    });
+
+                    callFrame.on("left-meeting", function() {
+                        console.log("Left meeting");
+                        isCallActive = false;
+                        btn.classList.remove("active");
+                        btn.disabled = false;
+                        btn.innerHTML = "\uD83C\uDFA4";
+                        statusEl.textContent = "Call ended. Click mic to start again.";
+                        callFrame.destroy();
+                        callFrame = null;
+                    });
+
+                    callFrame.on("error", function(err) {
+                        console.error("Daily error:", err);
+                        statusEl.textContent = "Connection error";
+                        setError(err.errorMsg || JSON.stringify(err));
+                        btn.disabled = false;
+                        btn.classList.remove("active");
+                        btn.innerHTML = "\uD83C\uDFA4";
+                        isCallActive = false;
+                    });
+
+                    return callFrame.join({ url: webCallUrl });
+                })
+                .catch(function(err) {
+                    console.error("Error:", err);
+                    statusEl.textContent = "Failed to connect";
+                    setError(err.message);
+                    btn.disabled = false;
+                });
+        });
     </script>
 </body>
 </html>

@@ -6,10 +6,12 @@ All AI prompts used in this project, documented for transparency and easy iterat
 
 ## 1. Document Summarizer Prompt
 
-- **File:** `app/services/summarizer.py:L14-L30`
-- **Used by:** Claude API (`claude-sonnet-4-20250514`)
+- **File:** `app/services/summarizer.py`
+- **Used by:** OpenAI API (`gpt-4o-mini`) with `response_format: { "type": "json_object" }`
 - **Purpose:** Generate a structured document summary with key points, relevance assessment, further reading links, and a TTS-optimized voice text
 - **Output format:** JSON with keys: `summary`, `key_points`, `relevance`, `further_reading`, `voice_text`
+
+**Why OpenAI instead of Claude:** Claude occasionally wraps JSON output in markdown code fences (` ```json ... ``` `), which breaks JSON parsing. GPT-4o-mini with `response_format: json_object` guarantees clean JSON output without extra stripping logic.
 
 **Prompt text:**
 
@@ -37,8 +39,8 @@ Guidelines:
 
 ## 2. VAPI Assistant System Prompt
 
-- **File:** `app/services/vapi_assistant.py:L9-L27`
-- **Used by:** VAPI → Claude API (`claude-sonnet-4-20250514`)
+- **File:** `app/services/vapi_assistant.py`
+- **Used by:** VAPI → OpenAI API (`gpt-4o-mini`)
 - **Purpose:** Configure the voice discussion agent with document context and behavioral guidelines
 - **Output format:** Conversational voice responses
 
@@ -77,8 +79,8 @@ Your role:
 
 ## 3. VAPI First Message Template
 
-- **File:** `app/services/vapi_assistant.py:L29-L31`
-- **Used by:** VAPI (assistant greeting)
+- **File:** `app/services/vapi_assistant.py`
+- **Used by:** VAPI (assistant greeting when call connects)
 - **Purpose:** Dynamic greeting that references the document title
 
 **Prompt text:**
@@ -89,3 +91,29 @@ Hi! I've read through "{title}" and I'm ready to discuss it with you. What would
 
 **Template variables:**
 - `{title}` — Document title
+
+---
+
+## 4. Plain Text Chat Prompt
+
+- **File:** `app/bot/handlers.py`
+- **Used by:** OpenAI API (`gpt-4o-mini`)
+- **Purpose:** Respond to plain text messages sent directly to the bot (not document uploads)
+- **Output format:** Conversational text reply
+
+**System message:**
+
+```
+You are a helpful assistant. Answer the user's question clearly and concisely.
+```
+
+---
+
+## Prompt Change Log
+
+| Date | Change | Reason |
+|------|--------|--------|
+| Initial | Summarizer used Claude (`claude-sonnet-4-20250514`) | Original design |
+| During implementation | Switched summarizer to OpenAI GPT-4o-mini | Claude wrapped JSON in markdown fences, breaking parsing |
+| During implementation | Switched VAPI model from Claude to OpenAI GPT-4o-mini | Consistency; Claude not available as VAPI model provider in test env |
+| During implementation | Switched VAPI voice from ElevenLabs to Vapi built-in "Elliot" | ElevenLabs requires separate account and VAPI credential registration |

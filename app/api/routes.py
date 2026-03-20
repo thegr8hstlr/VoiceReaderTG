@@ -6,9 +6,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from app.config import settings
 from app.services.session_store import get_session
-from app.services.vapi_assistant import create_document_assistant
+from app.services.vapi_assistant import create_web_call
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,7 @@ async def chat_page(request: Request, session_id: str):
             "session_id": session_id,
             "title": session.title,
             "summary": session.summary_result.summary,
-            "vapi_api_key": settings.vapi_api_key,
+            "vapi_public_key": "",  # no longer used; calls created server-side
         },
     )
 
@@ -45,12 +44,9 @@ async def start_assistant(session_id: str):
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found or expired")
 
-    if session.vapi_assistant_id:
-        return JSONResponse(content={"assistant_id": session.vapi_assistant_id})
-
     try:
-        assistant_id = await create_document_assistant(session_id)
-        return JSONResponse(content={"assistant_id": assistant_id})
+        web_call_url = await create_web_call(session_id)
+        return JSONResponse(content={"web_call_url": web_call_url})
     except Exception as e:
-        logger.exception("Failed to create VAPI assistant: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to create voice assistant")
+        logger.exception("Failed to create web call: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to create voice call")
