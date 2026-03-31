@@ -44,6 +44,14 @@
         #call-btn.active { background: #dc2626; }
         #call-btn.active:hover { background: #b91c1c; }
         #call-btn:disabled { background: #333; cursor: not-allowed; transform: none; }
+        #call-btn.pulse {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.5); }
+            70% { box-shadow: 0 0 0 15px rgba(37, 99, 235, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+        }
         #error-msg { color: #f87171; font-size: 0.8rem; margin-top: 1rem; display: none; }
         .transcript {
             margin-top: 1.5rem;
@@ -54,7 +62,7 @@
             line-height: 1.6;
         }
         .transcript p { margin-bottom: 0.5rem; }
-        .transcript .assistant { color: #60a5fa; }
+        .transcript .agent { color: #60a5fa; }
         .transcript .user { color: #34d399; }
     </style>
 </head>
@@ -71,16 +79,18 @@
         </div>
     </div>
 
-    <script src="https://unpkg.com/@daily-co/daily-js"></script>
-    <script>
+    <script type="module">
+        import { RetellWebClient } from "https://esm.sh/retell-client-js-sdk";
+
         var SESSION_ID = "{{ session_id }}";
         var BASE_URL = window.location.origin;
 
         var btn = document.getElementById("call-btn");
         var statusEl = document.getElementById("status");
         var errorEl = document.getElementById("error-msg");
+        var transcriptEl = document.getElementById("transcript");
 
-        var callFrame = null;
+        var retellClient = new RetellWebClient();
         var isCallActive = false;
 
         function setError(msg) {
@@ -88,17 +98,71 @@
             errorEl.style.display = msg ? "block" : "none";
         }
 
+        function addTranscript(role, text) {
+            var p = document.createElement("p");
+            p.className = role;
+            p.textContent = (role === "agent" ? "AI: " : "You: ") + text;
+            transcriptEl.appendChild(p);
+            transcriptEl.scrollTop = transcriptEl.scrollHeight;
+        }
+
+        // Retell events
+        retellClient.on("call_started", function() {
+            console.log("Call started");
+            isCallActive = true;
+            btn.classList.add("active");
+            btn.classList.remove("pulse");
+            btn.disabled = false;
+            btn.innerHTML = "\u23F9";
+            statusEl.textContent = "Connected \u2014 speak now";
+            setError("");
+        });
+
+        retellClient.on("call_ended", function() {
+            console.log("Call ended");
+            isCallActive = false;
+            btn.classList.remove("active", "pulse");
+            btn.disabled = false;
+            btn.innerHTML = "\uD83C\uDFA4";
+            statusEl.textContent = "Call ended. Click mic to start again.";
+        });
+
+        retellClient.on("agent_start_talking", function() {
+            statusEl.textContent = "Agent is speaking...";
+        });
+
+        retellClient.on("agent_stop_talking", function() {
+            if (isCallActive) statusEl.textContent = "Listening...";
+        });
+
+        retellClient.on("update", function(update) {
+            if (update.transcript) {
+                transcriptEl.innerHTML = "";
+                update.transcript.forEach(function(entry) {
+                    addTranscript(entry.role, entry.content);
+                });
+            }
+        });
+
+        retellClient.on("error", function(err) {
+            console.error("Retell error:", err);
+            statusEl.textContent = "Connection error";
+            setError(err.message || JSON.stringify(err));
+            btn.disabled = false;
+            btn.classList.remove("active", "pulse");
+            btn.innerHTML = "\uD83C\uDFA4";
+            isCallActive = false;
+        });
+
+        // Button handler
         btn.addEventListener("click", function() {
             if (isCallActive) {
-                if (callFrame) callFrame.leave();
-                isCallActive = false;
-                btn.classList.remove("active");
-                btn.innerHTML = "\uD83C\uDFA4";
-                statusEl.textContent = "Call ended. Click mic to start again.";
+                retellClient.stopCall();
                 return;
             }
 
             btn.disabled = true;
+            btn.classList.add("pulse");
             setError("");
             statusEl.textContent = "Creating voice call...";
 
@@ -108,53 +172,17 @@
                     return resp.json();
                 })
                 .then(function(data) {
-                    var webCallUrl = data.web_call_url;
-                    console.log("Web call URL:", webCallUrl);
-                    statusEl.textContent = "Connecting to voice call...";
-
-                    callFrame = DailyIframe.createCallObject({
-                        audioSource: true,
-                        videoSource: false,
+                    statusEl.textContent = "Connecting...";
+                    return retellClient.startCall({
+                        accessToken: data.access_token,
                     });
-
-                    callFrame.on("joined-meeting", function() {
-                        console.log("Joined meeting");
-                        isCallActive = true;
-                        btn.classList.add("active");
-                        btn.disabled = false;
-                        btn.innerHTML = "\u23F9";
-                        statusEl.textContent = "Connected \u2014 speak now";
-                        setError("");
-                    });
-
-                    callFrame.on("left-meeting", function() {
-                        console.log("Left meeting");
-                        isCallActive = false;
-                        btn.classList.remove("active");
-                        btn.disabled = false;
-                        btn.innerHTML = "\uD83C\uDFA4";
-                        statusEl.textContent = "Call ended. Click mic to start again.";
-                        callFrame.destroy();
-                        callFrame = null;
-                    });
-
-                    callFrame.on("error", function(err) {
-                        console.error("Daily error:", err);
-                        statusEl.textContent = "Connection error";
-                        setError(err.errorMsg || JSON.stringify(err));
-                        btn.disabled = false;
-                        btn.classList.remove("active");
-                        btn.innerHTML = "\uD83C\uDFA4";
-                        isCallActive = false;
-                    });
-
-                    return callFrame.join({ url: webCallUrl });
                 })
                 .catch(function(err) {
                     console.error("Error:", err);
                     statusEl.textContent = "Failed to connect";
                     setError(err.message);
                     btn.disabled = false;
+                    btn.classList.remove("pulse");
                 });
         });
     </script>

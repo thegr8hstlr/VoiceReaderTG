@@ -1385,6 +1385,24 @@ wheels = [
 ]
 
 [[package]]
+name = "retell-sdk"
+version = "5.23.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "cryptography" },
+    { name = "distro" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/d9/0f7d7506faa43cd2ffd7263b3ae867e4ded8f506ac125e167ebb5c9c3f4b/retell_sdk-5.23.0.tar.gz", hash = "sha256:0545482134343ac0eb2ce23f5afb1e993d7c9dbc0b5bec92f247dde469c334ee", size = 478583, upload-time = "2026-03-27T02:08:23.302Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/ae/171307d642e9098c619358d2f80badc45ee483bf3459df9594013e607c3d/retell_sdk-5.23.0-py3-none-any.whl", hash = "sha256:2654ceeb62b5059fda27429410c336eb8cdb71100260a8f7315c837909c58539", size = 476333, upload-time = "2026-03-27T02:08:21.515Z" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1599,6 +1617,7 @@ dependencies = [
     { name = "python-docx" },
     { name = "python-multipart" },
     { name = "python-telegram-bot", extra = ["ext"] },
+    { name = "retell-sdk" },
     { name = "trafilatura" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1623,6 +1642,7 @@ requires-dist = [
     { name = "python-docx", specifier = ">=1.1.0" },
     { name = "python-multipart", specifier = ">=0.0.12" },
     { name = "python-telegram-bot", extras = ["ext"], specifier = ">=21.7" },
+    { name = "retell-sdk", specifier = ">=5.23.0" },
     { name = "trafilatura", specifier = ">=2.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]

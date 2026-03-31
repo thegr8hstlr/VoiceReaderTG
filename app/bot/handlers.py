@@ -11,6 +11,7 @@ from telegram.ext import ContextTypes
 from app.config import settings
 from app.models.schemas import SessionData
 from app.services.extractor import extract_docx, extract_pdf, extract_text_file, extract_url
+from app.services.retell_call import create_knowledge_base
 from app.services.session_store import save_session
 from app.services.summarizer import summarize_document
 from app.services.tts import generate_voice_note
@@ -142,6 +143,14 @@ async def _process_content(
         await status.edit_text("Failed to generate voice note.")
         return
 
+    # Upload document to Retell Knowledge Base for voice discussion
+    await status.edit_text("Preparing voice discussion...")
+    retell_kb_id = None
+    try:
+        retell_kb_id = await create_knowledge_base(title, text)
+    except Exception:
+        logger.exception("Failed to create Retell KB — discussion will use summary only")
+
     # Create session for voice discussion
     session_id = str(uuid.uuid4())
     session = SessionData(
@@ -149,13 +158,12 @@ async def _process_content(
         title=title,
         full_text=text,
         summary_result=summary_result,
+        retell_kb_id=retell_kb_id,
+        telegram_chat_id=update.effective_chat.id,
     )
     save_session(session)
 
     chat_url = f"{settings.base_url}/chat/{session_id}"
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Discuss This Document", url=chat_url)]]
-    )
 
     # Send voice note
     await update.message.reply_voice(
@@ -163,9 +171,30 @@ async def _process_content(
         caption=f"Voice summary of: {title}",
     )
 
-    # Send text summary with discuss button
-    await status.edit_text(
-        summary_result.as_telegram_markdown(),
-        parse_mode="Markdown",
-        reply_markup=keyboard,
-    )
+    # Send text summary
+    try:
+        points = "\n".join(f"• {p}" for p in summary_result.key_points)
+        html_body = (
+            f"<b>Summary</b>\n{summary_result.summary}\n\n"
+            f"<b>Key Points</b>\n{points}\n\n"
+            f"<b>Relevance</b>\n{summary_result.relevance}"
+        )
+        await status.edit_text(html_body, parse_mode="HTML")
+    except Exception:
+        logger.exception("Failed to send summary with HTML")
+        plain = f"{summary_result.summary}\n\n{summary_result.relevance}"
+        await status.edit_text(plain)
+
+    # Send discuss link as separate message
+    is_https = chat_url.startswith("https://")
+    if is_https:
+        keyboard = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🎙 Discuss This Document", url=chat_url)]]
+        )
+        await update.message.reply_text(
+            "Ready to discuss! Click below:", reply_markup=keyboard
+        )
+    else:
+        await update.message.reply_text(
+            f"🎙 Discuss this document — open in your browser:\n\n{chat_url}"
+        )

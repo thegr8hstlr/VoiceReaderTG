@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.routes import router as routes_router
-from app.api.vapi_webhook import router as webhook_router
+from app.api.retell_webhook import router as webhook_router
 from app.bot.runner import start_polling, stop_polling
 
 logging.basicConfig(

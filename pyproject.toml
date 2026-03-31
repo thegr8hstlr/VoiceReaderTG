@@ -1,7 +1,7 @@
 [project]
 name = "voicereadertg"
 version = "0.1.0"
-description = "Telegram bot that summarizes documents with voice notes and offers VAPI-powered voice discussions"
+description = "Telegram bot that summarizes documents with voice notes and offers Retell AI-powered voice discussions"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
     "jinja2>=3.1.0",
     "httpx>=0.28.0",
     "python-multipart>=0.0.12",
+    "retell-sdk>=5.23.0",
 ]
 
 [project.optional-dependencies]

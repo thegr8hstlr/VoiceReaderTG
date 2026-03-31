@@ -39,6 +39,7 @@ class SessionData(BaseModel):
     title: str
     full_text: str
     summary_result: SummaryResult
-    vapi_assistant_id: Optional[str] = None
-    vapi_tool_ids: list[str] = Field(default_factory=list)
+    retell_call_id: Optional[str] = None
+    retell_kb_id: Optional[str] = None
+    telegram_chat_id: Optional[int] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
