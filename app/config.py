@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     openai_api_key: str
     retell_api_key: str
     retell_agent_id: str
+    tavily_api_key: str = ""
     base_url: str = "http://localhost:8000"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}

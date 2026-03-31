@@ -18,6 +18,8 @@ dependencies = [
     "httpx>=0.28.0",
     "python-multipart>=0.0.12",
     "retell-sdk>=5.23.0",
+    "tavily-python>=0.7.23",
+    "duckduckgo-search>=8.1.1",
 ]
 
 [project.optional-dependencies]

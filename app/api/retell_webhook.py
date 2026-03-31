@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.services.retell_call import cleanup_knowledge_base
 from app.services.session_store import delete_session, get_session
+from app.services.web_search import search_web
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,20 @@ async def _send_transcript_pdf(chat_id: int, transcript: list[dict], title: str)
             files={"document": (filename, io.BytesIO(file_bytes), "text/plain")},
             timeout=15,
         )
+
+
+@router.post("/webhook/retell/tool/web_search")
+async def retell_web_search_tool(request: Request) -> JSONResponse:
+    """Handle Retell custom tool call for web search."""
+    body = await request.json()
+    query = body.get("args", {}).get("query", "") or body.get("query", "")
+    logger.info("Web search tool called with query: %s", query)
+
+    if not query:
+        return JSONResponse(content={"result": "No search query provided."})
+
+    result = await search_web(query)
+    return JSONResponse(content={"result": result})
 
 
 @router.post("/webhook/retell")
