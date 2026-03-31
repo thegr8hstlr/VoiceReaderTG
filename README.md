@@ -1,113 +1,148 @@
 # VoiceReaderTG
 
-Telegram bot that summarizes documents (PDF, DOCX, MD, TXT, URLs) with AI-generated voice notes and offers interactive voice discussions powered by VAPI.ai.
+Telegram bot that summarizes documents (PDF, DOCX, MD, TXT, URLs) with AI-generated voice notes and offers interactive voice discussions powered by Retell AI.
 
-## Current Status
-
-| Phase | Status |
-|-------|--------|
-| Phase 1 — Telegram bot (summarize + voice note) | Fully working |
-| Phase 2 — Voice discussion via VAPI | Works from VAPI dashboard; web link integration pending (widget auth issue) |
-
-## Architecture
+## How It Works
 
 ```
-User sends PDF / DOCX / MD / TXT / URL on Telegram
-  → Extract text (pdfplumber / python-docx / trafilatura / plain decode)
-  → Summarize with OpenAI GPT-4o-mini (JSON mode)
-  → Generate voice note (OpenAI TTS, tts-1, nova voice, OGG Opus)
-  → Send: voice note + text summary + "Discuss This Document" button
-
-User sends a plain text message
-  → LLM chat response via GPT-4o-mini
+User sends PDF / DOCX / URL / text on Telegram
+  -> Extract text (pdfplumber / python-docx / trafilatura)
+  -> Summarize with OpenAI GPT-4o-mini
+  -> Generate voice note (OpenAI TTS)
+  -> Upload document to Retell Knowledge Base
+  -> Send: voice note + summary + "Discuss This Document" button
 
 User clicks "Discuss This Document"
-  → Opens web page with VAPI voice widget
-  → VAPI tools created, then dynamic assistant created with document context
-  → User asks follow-up questions via voice
-  → VAPI tools: search_document, get_key_points, get_further_reading
-  → On call end: assistant and tools cleaned up automatically
+  -> Opens web page with voice call interface
+  -> Retell AI agent discusses the document via voice
+  -> Agent uses Knowledge Base (automatic RAG) for document questions
+  -> Agent uses web search (Tavily/DuckDuckGo) for broader topics
+  -> Transcript sent to Telegram after call ends
 ```
 
 ## Features
 
 - PDF, DOCX, MD, TXT document processing
-- URL / article content extraction via trafilatura
-- AI-powered structured summaries (OpenAI GPT-4o-mini, JSON mode)
-- Voice note generation (OpenAI TTS, OGG Opus — no conversion needed)
-- Plain text messages get LLM chat responses
-- Interactive voice discussions via VAPI.ai
-- Dynamic VAPI assistant creation per document (tools created separately, then referenced by ID)
-- Server-side tool calling for document search
-- Webhook-based assistant lifecycle management
+- URL / article content extraction
+- AI-powered structured summaries with key points
+- Voice note generation (OpenAI TTS, OGG Opus)
+- Voice discussions via Retell AI with automatic document RAG
+- Web search during voice calls (Tavily + DuckDuckGo fallback)
+- Multilingual support (English, Hindi, and more)
+- Discussion transcript sent to Telegram after call
 - In-memory session store with 1hr TTL
+- Docker deployment with Caddy reverse proxy
 
 ## Tech Stack
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | FastAPI + Python 3.11+ |
+| Backend | FastAPI + Python 3.12 |
 | Telegram Bot | python-telegram-bot v21 (async) |
-| Summarization | OpenAI GPT-4o-mini (response_format: json_object) |
-| Chat (plain messages) | OpenAI GPT-4o-mini |
-| Voice Notes | OpenAI TTS (tts-1, nova voice, OGG Opus) |
-| Voice Discussion | VAPI.ai (REST API + HTML widget) |
-| VAPI LLM | OpenAI GPT-4o-mini |
-| VAPI Voice | Vapi built-in "Elliot" |
-| VAPI Transcriber | Deepgram Nova-3 |
+| Summarization | OpenAI GPT-4o-mini |
+| Voice Notes | OpenAI TTS (tts-1, nova voice) |
+| Voice Discussion | Retell AI (Knowledge Base + Web Call SDK) |
+| Web Search | Tavily (primary) + DuckDuckGo (fallback) |
 | PDF Extraction | pdfplumber |
 | DOCX Extraction | python-docx |
 | URL Extraction | trafilatura |
-| Plain text / MD | Built-in decode |
+| Deployment | Docker + Caddy |
 
 ## Quick Start
 
-```bash
-# Clone and enter project
-git clone <repo-url> && cd VoiceReaderTG
+### 1. Clone and install
 
-# Install dependencies
+```bash
+git clone https://github.com/thegr8hstlr/VoiceReaderTG.git
+cd VoiceReaderTG
 uv sync
-
-# Configure environment
-cp .env.example .env
-# Edit .env — need TELEGRAM_BOT_TOKEN, OPENAI_API_KEY, VAPI_API_KEY, VAPI_PUBLIC_KEY, BASE_URL
-
-# Run
-uv run uvicorn app.main:app --reload
 ```
 
-For VAPI webhooks, you need a public URL. Use Cloudflare Tunnel (recommended — stable, free):
+### 2. Configure environment
+
 ```bash
-cloudflared tunnel --url http://localhost:8000
+cp .env.example .env
 ```
-Then set `BASE_URL` in `.env` to the tunnel URL. See [Setup Guide](docs/SETUP.md) for details, including the required VAPI provider credential registration step.
 
-## Known Limitations
+Edit `.env` with your API keys:
+- `TELEGRAM_BOT_TOKEN` — from [@BotFather](https://t.me/BotFather)
+- `OPENAI_API_KEY` — from [OpenAI](https://platform.openai.com/api-keys)
+- `ANTHROPIC_API_KEY` — from [Anthropic](https://console.anthropic.com/)
+- `RETELL_API_KEY` — from [Retell AI](https://www.retellai.com/)
+- `RETELL_AGENT_ID` — create an agent on Retell dashboard (see below)
+- `TAVILY_API_KEY` — (optional) from [Tavily](https://tavily.com/) for web search
+- `BASE_URL` — your public HTTPS URL (required for Telegram buttons and Retell webhooks)
 
-- **VAPI web widget with dynamic assistants**: The public-key-based VAPI widget returns 403 when given a dynamically created assistant ID. Voice discussion currently only works via the VAPI dashboard. Fix requires server-side `POST /call/web` to create a WebRTC call and deliver the URL to the browser.
-- **ngrok free tier**: Shows an interstitial page on first request, breaking VAPI webhook delivery. Use Cloudflare Tunnel instead.
-- **In-memory sessions**: Sessions are lost on server restart. Acceptable for development; swap to Redis for production.
+### 3. Set up Retell AI agent
 
-## Documentation
+1. Sign up at [retellai.com](https://www.retellai.com/)
+2. Create a new agent with a Retell LLM
+3. Set the system prompt with dynamic variable placeholders:
 
-- [Architecture](docs/ARCHITECTURE.md) — System design, data flow, and design decisions
-- [Setup Guide](docs/SETUP.md) — Detailed setup including VAPI credential steps and tunnel options
-- [VAPI Integration](docs/VAPI_INTEGRATION.md) — API usage details, webhook format, and implementation learnings
-- [Prompts Registry](docs/PROMPTS.md) — All AI prompts documented with change log
+```
+You are a female voice assistant discussing a specific document with the user.
+You speak in the same language the user speaks.
+
+Document Title: {{document_title}}
+Summary: {{document_summary}}
+Key Points: {{key_points}}
+```
+
+4. Set begin message: `Hi! I've read through "{{document_title}}" and I'm ready to discuss it. What would you like to know?`
+5. Copy the Agent ID to your `.env`
+
+### 4. Run locally
+
+```bash
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+For the "Discuss" button to work, you need a public HTTPS URL. Use ngrok for local dev:
+
+```bash
+ngrok http 8000
+```
+
+Set `BASE_URL` in `.env` to the ngrok URL.
+
+### 5. Deploy with Docker (production)
+
+```bash
+docker compose up -d --build
+```
+
+Use Caddy or nginx as a reverse proxy with HTTPS. Example Caddy config:
+
+```
+voice.yourdomain.com {
+    reverse_proxy localhost:8000
+    encode gzip
+}
+```
 
 ## Project Structure
 
 ```
 app/
 ├── main.py              # FastAPI entry point + bot lifecycle
-├── config.py            # Environment configuration (pydantic-settings, extra="ignore")
-├── bot/                 # Telegram bot handlers
-├── services/            # Business logic (extraction, summarization, TTS, VAPI)
-├── tools/               # VAPI tool handlers
-├── api/                 # HTTP routes + VAPI webhooks
-├── models/              # Pydantic data schemas
-└── templates/           # Chat page HTML
+├── config.py            # Environment configuration
+├── bot/
+│   ├── runner.py        # Telegram bot setup and polling
+│   └── handlers.py      # Message/document processing pipeline
+├── services/
+│   ├── extractor.py     # PDF, DOCX, URL, text extraction
+│   ├── summarizer.py    # AI summarization (OpenAI)
+│   ├── tts.py           # Voice note generation (OpenAI TTS)
+│   ├── retell_call.py   # Retell AI web call + KB management
+│   ├── session_store.py # In-memory session storage
+│   └── web_search.py    # Tavily + DuckDuckGo web search
+├── api/
+│   ├── routes.py        # HTTP endpoints (health, chat page, start call)
+│   └── retell_webhook.py # Retell event handler (transcript, cleanup)
+├── models/
+│   └── schemas.py       # Pydantic data models
+└── templates/
+    └── chat.html        # Voice call web interface (Retell SDK)
 ```
 
 ## License
